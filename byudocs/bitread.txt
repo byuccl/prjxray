@@ -1,0 +1,81 @@
+In the tools directory there is a program called bitread.cc which
+reads bitstreams and spits them out in different formats.  This
+document simply summarizes how to use it since it may have use in the
+project.
+
+Fuzzer Usage:
+
+A typical fuzzer uses this tool near the end of its processing.  Once
+a set of .bit files are created, it uses this tool to convert those to
+.bits files.  This is typically done with the following command:
+
+	${XRAY_BITREAD} -F $XRAY_ROI_FRAMES -o ${x}s -z -y $x
+
+where $x is the name of a .bit file to process
+
+    The -F option specifies the range of frames to process.
+
+    The -o option specifies to output a .bits file.
+
+    The -z option says to skip frames which are all zeroes.
+
+    The -y option says to use format 'bit_%%08x_%%03d_%%02d' when
+    outputting bits that are set in the bitstream.
+
+To find differences between two bitstreams the fuzzer then usually
+does a diff between two of the readable .bits files and dumps that
+into .delta files.
+
+Interactive Usage:
+
+You can use this to dump out different versions of the bitstream.  For
+example:
+
+        ${XRAY_BITREAD} -F $XRAY_ROI_FRAMES < design.bit
+
+will print frames to the screen as in:
+
+        Bitstream size: 2298099 bytes
+        Config size: 574487 words
+        Number of configuration frames: 5408
+
+        Frame 0x00020500 (Type=0 Top=0 Row=1 Column=10 Minor=0):
+        02400000 00000000 02410000 00000000 0a400000 00010000
+        00000000 00000000 00000000 00000000 00000000 00000000
+        00000000 00000000 00000000 00000000 00000000 00000000
+        00000000 00000000 00000000 00000000 00000000 00000000
+
+Adding the -y option will give:
+
+        Bitstream size: 2298099 bytes
+        Config size: 574487 words
+        Number of configuration frames: 5408
+        
+        Frame 0x00020500 (Type=0 Top=0 Row=1 Column=10 Minor=0):
+        bit_00020500_000_22
+        bit_00020500_000_25
+        bit_00020500_002_16
+        bit_00020500_002_22
+
+where the fields are frame address, word, bit.  This is the format the
+fuzzers give.  Note, that by default only bits that are turned on are printed.
+Also, only bits in word 50 after the CRC bits are printed unless you
+specify the -C option (in which case all of on-bits of word 50 are printed).
+
+Or, adding the -x option will give:
+
+        Bitstream size: 2298099 bytes
+        Config size: 574487 words
+        Number of configuration frames: 5408
+        
+        Frame 0x00020500 (Type=0 Top=0 Row=1 Column=10 Minor=0):
+        bit_00020500_000_22_t0_h0_r1_c10_m0
+        bit_00020500_000_25_t0_h0_r1_c10_m0
+        bit_00020500_002_16_t0_h0_r1_c10_m0
+        bit_00020500_002_22_t0_h0_r1_c10_m0
+
+where the different fields separated by _'s give even more information
+than above.
+
+There are a bunch more options.  See the code.
+
