@@ -42,7 +42,7 @@ for tile, pips_nodes in tiledata.items():
 
 
 def bitfilter(frame_idx, bit_idx):
-    assert os.getenv("XRAY_DATABASE") in ["artix7", "kintex7"]
+    assert os.getenv("XRAY_DATABASE") in ["artix7", "kintex7", "pynq"]
     return frame_idx in [0, 1]
 
 

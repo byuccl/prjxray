@@ -38,8 +38,11 @@ def gen_slicems():
         x = 6, 8, 10, 12, 14
     '''
     # TODO: generate this from DB
-    assert ((12, 28) == SLICEX)
-    for slicex in (12, 14):
+    #assert ((12, 28) == SLICEX)
+    slicex_start = SLICEX[0]
+    slicex_end = slicex_start+2
+    #for slicex in (12, 14):
+    for slicex in (slicex_start, slicex_end):
         for slicey in range(*SLICEY):
             # caller may reject position if needs more room
             #yield ("SLICE_X%dY%d" % (slicex, slicey), (slicex, slicey))

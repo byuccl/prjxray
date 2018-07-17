@@ -33,7 +33,7 @@ zero_db = [
 
 
 def add_zero_bits(tile_type):
-    assert os.getenv("XRAY_DATABASE") in ["artix7", "kintex7"]
+    assert os.getenv("XRAY_DATABASE") in ["artix7", "kintex7", "pynq" ]
     dbfile = "%s/%s/segbits_%s.db" % (
         os.getenv("XRAY_DATABASE_DIR"), os.getenv("XRAY_DATABASE"), tile_type)
     new_lines = set()

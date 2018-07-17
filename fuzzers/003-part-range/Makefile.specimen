@@ -1,0 +1,3 @@
+
+device_rows.txt tile_map.txt: ../print_tile_map.tcl
+	vivado -mode batch -source ../print_tile_map.tcl

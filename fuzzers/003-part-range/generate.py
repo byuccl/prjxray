@@ -9,47 +9,31 @@ tiles = list()
 site_baseaddr = dict()
 tile_baseaddr = dict()
 
-# Open the tiles.txt file created in Vivado by the generate.tcl script.
-# Note that this is a subset of tiles in the device.
 with open("tiles.txt") as f:
     for line in f:
         tiles.append(line.split())
 
-# Open each file of bit diffs
 for arg in sys.argv[1:]:
     with open(arg) as f:
-        # strip all the information for the site bit
         line = f.read().strip()
         site = arg[7:-6]
         frame = int(line[5:5 + 8], 16)
-        # add a map entry from the *site* name for the base address of the site
-        # (note the masking: minor addresses are removed)
         site_baseaddr[site] = "0x%08x" % (frame & ~0x7f)
-        # My additions
-        #print(line)
-        #print("site=",site, "frame=", frame, "site_base=", site_baseaddr[site])
-        
+
 #######################################
 # Create initial database
 
 database = dict()
 database["tiles"] = dict()
 database["segments"] = dict()
-# x,y look up of tiles
 tiles_by_grid = dict()
 
-# Iterate over all of the tiles in the device and create a record for each tile
 for record in tiles:
-
-    # parse all the elements of this tile
     tile_type, tile_name, grid_x, grid_y = record[0:4]
     grid_x, grid_y = int(grid_x), int(grid_y)
-    # create a map from the x,y location of the tile to its name
     tiles_by_grid[(grid_x, grid_y)] = tile_name
-    # we don't know the frame base address from the vivado tile information
     framebaseaddr = None
 
-    # Create a record for this tile and partially populate it
     database["tiles"][tile_name] = {
         "type": tile_type,
         "sites": dict(),
@@ -57,49 +41,19 @@ for record in tiles:
         "grid_y": grid_y
     }
 
-    # if there are more than 4 entries to the record then the extra entries are
-    # pairs of (site type, site name). See tiles.txt for an example. These
-    # are added to the tile record.
     if len(record) > 4:
         for i in range(4, len(record), 2):
             site_type, site_name = record[i:i + 2]
-            # Look up the base address of the site (if it exists) from our
-            # previous step.
             if site_name in site_baseaddr:
                 framebaseaddr = site_baseaddr[site_name]
             database["tiles"][tile_name]["sites"][site_name] = site_type
 
-    # If we have a frame address for at least one site of the tile,
-    # link it to the tile name
     if framebaseaddr is not None:
         tile_baseaddr[tile_name] = [framebaseaddr, 0]
-        #print("Linking tile",tile_name," to base address",framebaseaddr)
-        
+
 #######################################
 # Add Segments
-# (segments seem to be slices and sites within tiles and their bitstream info)
 
-# Database organization:
-# "tiles" (dictionary)
-#  tile_name (any tile)
-#   "type" (string tyle type)
-#   "sites" (dictionary)
-#     site_name (string name of child site)
-#   "grid_x" grid_x location
-#   "grid_y" grid_y location
-#   "segment" (a link to the corresponding "segment" dictionary entry for this tile)
-# "segments" (dictionary)
-#  segment_name (dictionary)
-#   "tiles"
-#    clb_tile_name,int_tile_name (for CLB tiles)
-#   "type"
-#    segment type (lower case CLB tile type for CLB tiles)
-#   "frames"
-#    36 for CLB
-#   "words"
-#    2 for CLB
-#   "baseaddr"
-#    [baseaddress, offset] pair
 for tile_name, tile_data in database["tiles"].items():
     tile_type = tile_data["type"]
     grid_x = tile_data["grid_x"]
@@ -107,16 +61,12 @@ for tile_name, tile_data in database["tiles"].items():
 
     if tile_type in ["CLBLL_L", "CLBLL_R", "CLBLM_L", "CLBLM_R"]:
         if tile_type in ["CLBLL_L", "CLBLM_L"]:
-            # This references to the companion "interconnect" tile.
-            # For "L" CLB tiles, the interconnect is x+1, for "R" CLB tiles
-            # the interconnect is x-1.
             int_tile_name = tiles_by_grid[(grid_x + 1, grid_y)]
         else:
             int_tile_name = tiles_by_grid[(grid_x - 1, grid_y)]
 
         segment_name = "SEG_" + tile_name
         segtype = tile_type.lower()
-        #print("CLB segment=",segment_name,segtype, "interconnect",int_tile_name)
 
         database["segments"][segment_name] = dict()
         database["segments"][segment_name]["tiles"] = [
@@ -129,7 +79,6 @@ for tile_name, tile_data in database["tiles"].items():
         if tile_name in tile_baseaddr:
             database["segments"][segment_name]["baseaddr"] = tile_baseaddr[
                 tile_name]
-            #print("Putting baseaddress:",segment_name,tile_baseaddr[tile_name])
 
         database["tiles"][tile_name]["segment"] = segment_name
         database["tiles"][int_tile_name]["segment"] = segment_name
@@ -137,7 +86,6 @@ for tile_name, tile_data in database["tiles"].items():
     if tile_type in ["HCLK_L", "HCLK_R"]:
         segment_name = "SEG_" + tile_name
         segtype = tile_type.lower()
-        #print("HCLK segment=",segment_name,segtype)
 
         database["segments"][segment_name] = dict()
         database["segments"][segment_name]["tiles"] = [tile_name]
@@ -158,7 +106,6 @@ for tile_name, tile_data in database["tiles"].items():
             segment_name = "SEG_" + tile_name.replace("_", "%d_" % k, 1)
             segtype = tile_type.lower().replace("_", "%d_" % k, 1)
 
-            #print("BRAM segment=",segment_name,segtype)
             database["segments"][segment_name] = dict()
             database["segments"][segment_name]["type"] = segtype
             database["segments"][segment_name]["frames"] = 28
@@ -256,7 +203,6 @@ for segment_name in start_segments:
 # Transfer segment data into tiles
 
 for segment_name in database["segments"].keys():
-    #print(segment_name)
     baseaddr, offset = database["segments"][segment_name]["baseaddr"]
     for tile_name in database["segments"][segment_name]["tiles"]:
         tile_type = database["tiles"][tile_name]["type"]
@@ -280,7 +226,6 @@ for segment_name in database["segments"].keys():
             # print(tile_type, offset)
             assert False
 
-            # clear out the other fields of the database
 database = database["tiles"]
 
 for tiledata in database.values():

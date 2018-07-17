@@ -3,3 +3,4 @@
 # Ignore database directories _except_ for their settings
 database/*/*
 !database/*/settings.sh
+!database/pynq/xc7z020clg400-1.yaml
