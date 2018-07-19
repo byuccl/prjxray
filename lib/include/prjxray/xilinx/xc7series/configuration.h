@@ -10,6 +10,8 @@
 #include <prjxray/xilinx/xc7series/frame_address.h>
 #include <prjxray/xilinx/xc7series/part.h>
 
+#include <iostream>
+
 namespace prjxray {
 namespace xilinx {
 namespace xc7series {
@@ -59,10 +61,14 @@ absl::optional<Configuration> Configuration::InitWithPackets(
 	bool start_new_write = false;
 	FrameAddress current_frame_address = 0;
 
+        std::cerr << "Here!" << std::endl;
+	
 	Configuration::FrameMap frames;
 	for (auto packet : packets) {
-		if (packet.opcode() != ConfigurationPacket::Opcode::Write) {
-			continue;
+
+	  // Ignore configuartion packets that are reads
+	        if (packet.opcode() != ConfigurationPacket::Opcode::Write) {
+		  continue;
 		}
 
 		switch (packet.address()) {
@@ -95,6 +101,7 @@ absl::optional<Configuration> Configuration::InitWithPackets(
 
 				// If the IDCODE doesn't match our expected
 				// part, consider the bitstream invalid.
+				std::cerr << "Packet opcode=" << std::hex << packet.data()[0] << " part id code " << std::hex << part.idcode() << std::endl;
 				if (packet.data()[0] != part.idcode()) {
 					return {};
 				}
@@ -159,6 +166,8 @@ absl::optional<Configuration> Configuration::InitWithPackets(
 				break;
 		}
 	}
+
+        std::cerr << "Here2!" << std::endl;
 
 	return Configuration(part, frames);
 }
