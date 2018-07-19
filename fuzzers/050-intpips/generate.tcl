@@ -1,3 +1,10 @@
+# Print directory so the log knows where this was run
+set dir [pwd]
+puts "**************************************************"
+puts "* Starting new speciman at:"
+puts "*  $dir"
+puts "**************************************************"
+
 create_project -force -part $::env(XRAY_PART) design design
 
 read_verilog ../top.v
