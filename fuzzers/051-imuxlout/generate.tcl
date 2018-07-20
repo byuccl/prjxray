@@ -31,16 +31,19 @@ close $fp
 #
 
 
-set int_l_tiles [randsample_list_noremove [llength $todo_lines] [filter [pblock_tiles roi] {TYPE == INT_L}]]
-set int_r_tiles [randsample_list_noremove [llength $todo_lines] [filter [pblock_tiles roi] {TYPE == INT_R}]]
+#set int_l_tiles [randsample_list_noremove [llength $todo_lines] [filter [pblock_tiles roi] {TYPE == INT_L}]]
+#set int_r_tiles [randsample_list_noremove [llength $todo_lines] [filter [pblock_tiles roi] {TYPE == INT_R}]]
+# create a non randomized list of tiles
+set int_l_tiles [filter [pblock_tiles roi] {TYPE == INT_L}]
+set int_r_tiles [filter [pblock_tiles roi] {TYPE == INT_R}]
 
 
-puts "[llength $todo_lines] lines in todo file, [llength $int_l_tiles] [llength $int_r_tiles]"
+#puts "[llength $todo_lines] lines in todo file, [llength $int_l_tiles] [llength $int_r_tiles]"
 
-puts "int_l_tiles:"
-puts $int_l_tiles
-puts "int_r_tiles:"
-puts $int_r_tiles
+#puts "int_l_tiles:"
+#puts $int_l_tiles
+#puts "int_r_tiles:"
+#puts $int_r_tiles
 
 for {set idx 0} {$idx < [llength $todo_lines]} {incr idx} {
 	set line [lindex $todo_lines $idx]
@@ -49,12 +52,21 @@ for {set idx 0} {$idx < [llength $todo_lines]} {incr idx} {
 	set dst_wire [lindex $line 1]
 	set src_wire [lindex $line 2]
 
-    puts "=== LINE:$line ($tile_type $dst_wire $src_wire)"
-    
-	if {$tile_type == "INT_L"} {set tile [lindex $int_l_tiles $idx]}
-	if {$tile_type == "INT_R"} {set tile [lindex $int_r_tiles $idx]}
+    #if {$tile_type == "INT_L"} {set tile [lindex $int_l_tiles $idx]}
+    #if {$tile_type == "INT_R"} {set tile [lindex $int_r_tiles $idx]}
+    # Get a random tile and then remove the tile from the available tile list
+    if {$tile_type == "INT_L"} {
+	set j [expr {int(rand()*[llength $int_l_tiles])}]
+	set tile [lindex $int_l_tiles $j]
+	set int_l_tiles [lreplace $int_l_tiles $j $j]
+    }
+    if {$tile_type == "INT_R"} {
+	set j [expr {int(rand()*[llength $int_r_tiles])}]
+	set tile [lindex $int_r_tiles $j]
+	set int_r_tiles [lreplace $int_r_tiles $j $j]
+    } 
 
-    puts "==== TILE: $tile"
+    #puts "== LINE:$line ($tile_type $dst_wire $src_wire) TILE: $tile"
     
 	set clb_dst_wire [get_wires -filter {TILE_NAME =~ CLB*} -of_objects [get_nodes -of_objects [get_wire $tile/$dst_wire]]]
 	set clb_src_wire [get_wires -filter {TILE_NAME =~ CLB*} -of_objects [get_nodes -of_objects [get_wire $tile/$src_wire]]]
@@ -65,17 +77,20 @@ for {set idx 0} {$idx < [llength $todo_lines]} {incr idx} {
 	set src_prefix [regsub {(.*/.).*} ${clb_src_pin} {\1}]
 	set dst_prefix [regsub {(.*/.).*} ${clb_dst_pin} {\1}]
 
-        puts "==== $clb_dst_wire $clb_src_wire $clb_dst_pin $clb_src_pin $src_prefix $dst_prefix"
+    #puts "=== $clb_dst_wire $clb_src_wire $clb_dst_pin $clb_src_pin $src_prefix $dst_prefix"
 
 	if {$src_prefix == $dst_prefix} {
 		set slice [get_sites -of_objects $clb_dst_pin]
 		set lut [regsub {.*/} $src_prefix {}]6LUT
 
-		puts "=== SLICE: $slice $lut ($clb_src_pin -> $clb_dst_pin)"
+	    #puts "==== SLICE: $slice $lut ($clb_src_pin -> $clb_dst_pin)"
 
 		set mynet [create_net mynet_$idx]
 		set mylut [create_cell -reference LUT1 mylut_$idx]
-		set lutin [regsub {.*(.)} $clb_dst_pin {A\1}]
+	    set lutin [regsub {.*(.)} $clb_dst_pin {A\1}]
+
+	    #puts "LOC $slice BEL $lut LOCK_PINS I0:$lutin for $mylut"
+	    
 		set_property -dict "LOC $slice BEL $lut LOCK_PINS I0:$lutin" $mylut
 		connect_net -net $mynet -objects "$mylut/I0 $mylut/O"
 	}
