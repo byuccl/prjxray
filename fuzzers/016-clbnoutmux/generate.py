@@ -71,7 +71,6 @@ for loc, muxes in cache.items():
 
 def bitfilter(frame_idx, bit_idx):
     assert os.getenv("XRAY_DATABASE") in ["artix7", "pynq" ]
-    # assert os.getenv("XRAY_DATABASE") == "artix7"
 
     # locations of A5MA, B5MA, C5MA, D5MA bits. because of the way we generate specimens
     # in this fuzzer we get some aliasing with those bits, so we have to manually exclude

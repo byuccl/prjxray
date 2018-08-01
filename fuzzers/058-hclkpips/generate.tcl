@@ -44,32 +44,26 @@ for {set i 0} {$i < [llength $pips]} {incr i} {
 	write_checkpoint -force design_$i.dcp
 
     if { [ catch { write_bitstream -force design_$i.bit } err] } {
-
-        puts "**********************************************************" 
-	puts "*** Warning: write_bitstream failed for $pip"
-	puts "* "
-	puts "$err"
-	puts "* "
-	puts "* No output will be generated "
-        puts "**********************************************************" 
-	lappend failed_pip_routes $pip
-	     
-    } else {
-	    
-	set fp [open "design_$i.txt" w]
-	puts $fp "$tile $pip"
-	close $fp
+		puts "**********************************************************" 
+		puts "*** Warning: write_bitstream failed for $pip"
+		puts "* "
+		puts "$err"
+		puts "* "
+		puts "* No output will be generated "
+		puts "**********************************************************" 
+		lappend failed_pip_routes $pip     
+    } else {    
+		set fp [open "design_$i.txt" w]
+		puts $fp "$tile $pip"
+		close $fp
     }
-
 }
-
-
 
 set num_failed_pips [llength unknown_tile_types]
 if {$num_failed_pips > 0} {
     puts "\nFailed PIPs - $num_failed_pips"
     foreach failed_pip $num_failed_pips {
-	puts "\t$failed_pip"
+		puts "\t$failed_pip"
     }
 } else {
     puts $write_fd "\nNo Failed pips"

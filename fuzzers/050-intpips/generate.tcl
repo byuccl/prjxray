@@ -1,7 +1,7 @@
 # Print directory so the log knows where this was run
 set dir [pwd]
 puts "**************************************************"
-puts "* Starting new speciman at:"
+puts "* Starting new specimen at:"
 puts "*  $dir"
 puts "**************************************************"
 

@@ -1,5 +1,4 @@
 !<xilinx/xc7series/part>
-#idcode: 0x4ba00477
 idcode: 0x3727093
 global_clock_regions:
   top: !<xilinx/xc7series/global_clock_region>
