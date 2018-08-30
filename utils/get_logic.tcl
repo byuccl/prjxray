@@ -1,6 +1,6 @@
-#  get_logic.tcl
+# get_logic.tcl
 #
-#  Gets the bel to logical function mapping for all instantiated cells
+# Gets the bel to logical function mapping for all instantiated cells
 
 # There's two option here for how I could represent the output:
 #  1) I could have a whole recursive function that goes into each cell
@@ -14,7 +14,7 @@
 #   I don't think I need it for the pin mappings (plus I could get that from
 #   the netlist)
 
-#open the output file
+# Open the output file
 set outfile [open "logic_map.json" w]
 
 set cells [get_cells -hierarchical *]
@@ -22,14 +22,14 @@ set cells [get_cells -hierarchical *]
 #puts $outfile "\{ \"cells\" :"
 puts $outfile "\{"
 
-# Make a list of cells that actually have bels 
+# Make a list of cells that actually have bels
 set cells_w_bels {}
 foreach current_cell $cells {
     if { [llength [get_bels -of $current_cell]] != 0} {
-	lappend cells_w_bels $current_cell
+        lappend cells_w_bels $current_cell
     }
     if { [llength [get_bels -of $current_cell]] > 1} {
-	puts "WARNING: cell $current_cell has more than one bel!"
+        puts "WARNING: cell $current_cell has more than one bel!"
     }
 }
 
@@ -47,32 +47,39 @@ foreach current_cell $cells_w_bels {
 
     set pidx 0
     foreach cell_pin [get_pins -of $current_cell] {
-	#puts $cell_pin
-	puts -nonewline $outfile "    "
-	if {$pidx == 0} { puts -nonewline $outfile "\{" }
-	set pin_name [get_property NAME $cell_pin]
-	if {[llength [get_bel_pins -of $cell_pin]] == 0} {
-	    set bel_pin_name ""
-	} else {
-	    set bel_pin_name [get_property NAME [get_bel_pins -of $cell_pin]]
-	}
-	puts -nonewline $outfile " \"$pin_name\" : \"$bel_pin_name\" "
-	if {$pidx == [llength [get_pins -of $current_cell]] - 1} {
-	    puts -nonewline $outfile "\}"
-	} else { puts -nonewline $outfile ",\n"}
-	#puts -nonewline $outfile "\n"
-	incr pidx
+        #puts $cell_pin
+        puts -nonewline $outfile "    "
+        if {$pidx == 0} {
+            puts -nonewline $outfile "\{"
+        }
+        set pin_name [get_property NAME $cell_pin]
+        if {[llength [get_bel_pins -of $cell_pin]] == 0} {
+            set bel_pin_name ""
+        } else {
+            set bel_pin_name [get_property NAME [get_bel_pins -of $cell_pin]]
+        }
+        puts -nonewline $outfile " \"$pin_name\" : \"$bel_pin_name\" "
+        if {$pidx == [llength [get_pins -of $current_cell]] - 1} {
+            puts -nonewline $outfile "\}"
+        } else {
+            puts -nonewline $outfile ",\n"
+        }
+        #puts -nonewline $outfile "\n"
+        incr pidx
     }
 
     #puts -nonewline $outfile "\}"
-    
+
     if {$cidx == [llength $cells_w_bels] - 1} {
-	#puts -nonewline $outfile "\]"
-    } else {puts -nonewline $outfile ","}
+        #puts -nonewline $outfile "\]"
+    } else {
+        puts -nonewline $outfile ","
+    }
+
     puts -nonewline $outfile "\n"
-    
+
     incr cidx
-} 
+}
 
 puts $outfile "}"
 

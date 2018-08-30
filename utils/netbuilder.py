@@ -10,10 +10,10 @@ import argparse
 parser = argparse.ArgumentParser(description="Creates a netlist from xray files")
 parser.add_argument("segp", help="*.segp file created by XRAY_SEGPRINT")
 parser.add_argument("logic_map", help="logic_map.json file created by get_logic.tcl")
-#For now I'll just expect the tilegrid file to be passed manually, but it may
-#  be nice to ask instead for a target part and grab the tilegrid that way.
-#  Maybe that's the makefile's job, though.
-#Also note that this is the new tilegrid format 
+# For now I'll just expect the tilegrid file to be passed manually, but it may
+#   be nice to ask instead for a target part and grab the tilegrid that way.
+#   Maybe that's the makefile's job, though.
+# Also note that this is the new tilegrid format
 parser.add_argument("tilegrid", help="tilegrid.json file from xray database")
 parser.add_argument("-o", "--output", help="Output file")
 
@@ -55,7 +55,7 @@ for line in segp_f:
 
 segp_f.close()
 
-# for each entry in segp_d, go through the listed tags and (for now)
+# For each entry in segp_d, go through the listed tags and (for now)
 #   try to identify LUTs. For each LUT, read its equation and then try
 #   to get derive the logical equation.
 
@@ -68,17 +68,17 @@ lut_d = {}
 
 for seg in segp_d:
     for tag in segp_d[seg]:
-        #Try to identify if this is a lut
+        # Try to identify if this is a lut
         if tag.split(".")[2][1:] == "LUT":
-            #Grab the corresponding slice from the tilegrid
-            slicetype = tag.split(".")[1][:6] #Should be SLICEL/SLICEM
+            # Grab the corresponding slice from the tilegrid
+            slicetype = tag.split(".")[1][:6] # Should be SLICEL/SLICEM
             sliceid = ""
             for site in tgrid_d[seg]["sites"]:
                 if tgrid_d[seg]["sites"][site] == slicetype:
                     sliceid = site
                     #print("Found site",site,"for tag",tag)
-            #I want to collate all bits in the LUT eq together into
-            #  one object...
+            # I want to collate all bits in the LUT eq together into
+            #   one object...
             if sliceid not in lut_d:
                 lut_d[sliceid] = {}
             lutid = tag.split(".")[2]
@@ -97,7 +97,8 @@ for slice in lut_d:
         #   what it may be
         # For now I'll assume 6 bit LUTs
         LUT_size = 6
-        truth_table = [[0 for x in range(LUT_size + 1)] for y in range(2**LUT_size)]
+        truth_table = [[0 for x in range(LUT_size + 1)]
+                       for y in range(2**LUT_size)]
         for i in range(2**LUT_size):
             # I need to convert i into binary (because that's the row's
             #   inputs)
@@ -118,7 +119,7 @@ for slice in lut_d:
         pin_d = {}
         cell_name = ""
         for cell in lmap_d:
-            # try to find a pin that actually has a physical equivalent
+            # Try to find a pin that actually has a physical equivalent
             #   (not all of them do)
             lpin = ""
             for logical_pin in lmap_d[cell]:
@@ -177,7 +178,7 @@ for slice in lut_d:
 
         # Delete duplicate rows in the truth table
         unique_rows = []
-        to_del = [] #indices of rows to delete
+        to_del = [] # Indices of rows to delete
         idx = 0
         for row in truth_table:
             if row not in unique_rows:
@@ -186,7 +187,7 @@ for slice in lut_d:
                 #del truth_table[truth_table.index(row)]
                 to_del.append(idx)
             idx += 1
-        to_del.reverse() # keeps indices valid
+        to_del.reverse() # Keeps indices valid
         for idx in to_del:
             del truth_table[idx]
         print("Reduced Truth Table")
@@ -196,7 +197,7 @@ for slice in lut_d:
         # Re-order rows and columns to match logical ordering
         print("ttinputs:", tt_inputs)
         print(pin_d)
-        # logical truth_table inputs
+        # Logical truth_table inputs
         tt_l_inputs = []
         input_pre_str = list(pin_d.keys())[0][:-2]+'A'
         for i in tt_inputs:
@@ -252,10 +253,11 @@ for slice in lut_d:
         init_val = init_val >> 1
         print("Cell's init value:", format(init_val, 'x'))
         if cell_name in cells_to_lut_data:
-            print("WARNING! Cell", cell_name,"is already in cells_to_inits dict!")
+            print("WARNING! Cell", cell_name,
+                  "is already in cells_to_inits dict!")
             print("         Overwriting old value!")
         cells_to_lut_data[cell_name] = (init_val, len(tt_l_inputs))
-        
+
 # Now try to print a verilog netlist file
 # I don't really have many ways to differentiate the modules. I could grab the
 #   module name from the "root" of the cell name, although I would prefer to
@@ -273,13 +275,13 @@ for cell in cells_to_lut_data:
 if out_f is not None:
     out_f.write("//Header...\n")
     out_f.write("`timescale 1 ps / 1 ps\n\n")
-    
+
     for mod in mods_to_cells:
         out_f.write("module " + mod + "\n")
         # I need to figure out how to do the module i/o
         out_f.write("  (...)")
         out_f.write("\n")
-        
+
         # I don't yet have interconnect information, so no wires
         out_f.write("  // Wires: \n\n")
 
