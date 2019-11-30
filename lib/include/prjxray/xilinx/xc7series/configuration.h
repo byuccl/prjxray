@@ -9,9 +9,7 @@
 #include <prjxray/xilinx/xc7series/configuration_packet.h>
 #include <prjxray/xilinx/xc7series/frame_address.h>
 #include <prjxray/xilinx/xc7series/part.h>
-
 #include <iostream>
-
 namespace prjxray {
 namespace xilinx {
 namespace xc7series {
@@ -36,15 +34,20 @@ class Configuration {
 
 	Configuration(const Part& part, const FrameMap& frames)
 	    : part_(part), frames_(std::move(frames)) {}
+        
+    Configuration(const Part& part, const FrameMap& frames, const FrameMap& cfg_clb_frames)
+        : part_(part), frames_(std::move(frames)), cfg_clb_frames_(std::move(cfg_clb_frames)) {}
 
 	const Part& part() const { return part_; }
 	const FrameMap& frames() const { return frames_; }
+	const FrameMap& cfg_clb_frames() const { return cfg_clb_frames_; }
 
        private:
 	static constexpr int kWordsPerFrame = 101;
 
 	Part part_;
 	FrameMap frames_;
+	FrameMap cfg_clb_frames_;
 };
 
 template <typename Collection>
@@ -56,15 +59,16 @@ absl::optional<Configuration> Configuration::InitWithPackets(
 	uint32_t frame_address_register = 0;
 	uint32_t mask_register = 0;
 	uint32_t ctl1_register = 0;
+    std::vector<FrameAddress> encountered_frames;
 
 	// Internal state machine for writes.
 	bool start_new_write = false;
 	FrameAddress current_frame_address = 0;
-	
-	Configuration::FrameMap frames;
-	for (auto packet : packets) {
 
-		// Ignore configuartion packets that are reads
+	Configuration::FrameMap frames;
+	Configuration::FrameMap cfg_clb_frames;
+	for (auto packet : packets) {
+        // Ignore configuartion packets that are reads
 		if (packet.opcode() != ConfigurationPacket::Opcode::Write) {
 			continue;
 		}
@@ -100,7 +104,6 @@ absl::optional<Configuration> Configuration::InitWithPackets(
 				// If the IDCODE doesn't match our expected
 				// part, consider the bitstream invalid.
 				if (packet.data()[0] != part.idcode()) {
-					std::cerr << "Packet opcode=" << std::hex << packet.data()[0] << " part id code " << std::hex << part.idcode() << std::endl;
 					return {};
 				}
 				break;
@@ -133,6 +136,18 @@ absl::optional<Configuration> Configuration::InitWithPackets(
 					current_frame_address =
 					    frame_address_register;
 					start_new_write = false;
+                    
+                    // If this frame address has already been encountered, 
+                    // assume this bitstream has a blanking portion.
+                    // Therefore, throw all the frames so far away
+                    // since we don't want to have blanking frames.
+                    std::vector<FrameAddress>::iterator it = find(encountered_frames.begin(), encountered_frames.end(), current_frame_address);
+                    if (it != encountered_frames.end()) {
+                        frames.clear();
+                    }
+                    
+                    // Save the frame address so we can check for it later.
+                    encountered_frames.push_back(current_frame_address);  
 				}
 
 				// 7-series frames are 101-words long.  Writes
@@ -140,9 +155,18 @@ absl::optional<Configuration> Configuration::InitWithPackets(
 				// do auto-incrementing block writes.
 				for (size_t ii = 0; ii < packet.data().size();
 				     ii += kWordsPerFrame) {
-					frames[current_frame_address] =
-					    packet.data().subspan(
-					        ii, kWordsPerFrame);
+                         
+                     if (current_frame_address.block_type() == BlockType::CFG_CLB) {
+                        cfg_clb_frames[current_frame_address] =
+                            packet.data().subspan(
+                                ii, kWordsPerFrame);                                
+                     }
+                     else {
+                        frames[current_frame_address] =
+                            packet.data().subspan(
+                                ii, kWordsPerFrame);    
+                     }
+
 
 					auto next_address =
 					    part.GetNextFrameAddress(
@@ -165,7 +189,7 @@ absl::optional<Configuration> Configuration::InitWithPackets(
 		}
 	}
 
-	return Configuration(part, frames);
+	return Configuration(part, frames, cfg_clb_frames);
 }
 
 }  // namespace xc7series

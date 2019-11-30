@@ -1,5 +1,10 @@
 export XRAY_DATABASE="pynq"
 export XRAY_PART="xc7z020clg400-1"
+
+# Bigger region with 8 tiles
+# SLICE_X55Y0     CLBLM_R_X37Y0  97,155   * Need an extra tile to the right for the interconnect
+# SLICE_X69Y49    CLBLL_L_X44Y49 112,105  * Need an extra tile to the left for the interconnect
+# Need an extra tile column to the left
 export XRAY_ROI="SLICE_X54Y0:SLICE_X69Y49"
 export XRAY_ROI_GRID_X1="96"
 export XRAY_ROI_GRID_X2="113"

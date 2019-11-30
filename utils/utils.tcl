@@ -47,12 +47,13 @@ proc randsample_list {num lst} {
 
 # this creates a random list but does not remove them
 # allowing repeating elements. This is useful when the num
-# is greater than the size of lst to avoid empty entries.
+# is greater than the slize of lst to avoid empty entries.
 proc randsample_list_noremove {num lst} {
 	set rlst {}
 	for {set i 0} {$i<$num} {incr i} {
 		set j [expr {int(rand()*[llength $lst])}]
 		lappend rlst [lindex $lst $j]
+	        #set lst [lreplace $lst $j $j]
 	}
 	return $rlst
 }

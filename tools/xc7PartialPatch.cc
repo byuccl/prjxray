@@ -26,7 +26,7 @@ DEFINE_string(part_name, "", "");
 DEFINE_string(part_file, "", "Definition file for target 7-series part");
 DEFINE_string(bitstream_file,
               "",
-              "Initial bitstream to which the deltas are applied.");
+              "Initial partial bitstream to which the deltas are applied.");
 DEFINE_string(
     frm_file,
     "",
@@ -72,7 +72,15 @@ int main(int argc, char* argv[]) {
 		return 1;
 	}
 
-	// Copy the base frames to a mutable collection
+	// Copy the base frames to mutable collections
+    std::map<xc7series::FrameAddress, std::vector<uint32_t>> cfg_clb_frames;
+	for (auto& frame_val : bitstream_config->cfg_clb_frames()) {
+		auto& cur_frame = cfg_clb_frames[frame_val.first];
+
+		std::copy(frame_val.second.begin(), frame_val.second.end(),
+		          std::back_inserter(cur_frame));
+	}
+    
 	std::map<xc7series::FrameAddress, std::vector<uint32_t>> frames;
 	for (auto& frame_val : bitstream_config->frames()) {
 		auto& cur_frame = frames[frame_val.first];
@@ -80,6 +88,10 @@ int main(int argc, char* argv[]) {
 		std::copy(frame_val.second.begin(), frame_val.second.end(),
 		          std::back_inserter(cur_frame));
 	}
+    
+    // Assuming the map has been constructed so the first frame
+    // is the smallest value frame address.
+    uint32_t roi_start_frame_address = frames.begin()->first;
 
 	// Apply the deltas.
 	std::ifstream frm_file(FLAGS_frm_file);
@@ -100,6 +112,13 @@ int main(int argc, char* argv[]) {
 
 		uint32_t frame_address =
 		    std::stoul(frame_delta.first, nullptr, 16);
+            
+        // Skip lines whose frame addresses weren't in the base bitstream.
+        // TODO: Make .frm files only contain frame addresses for the 
+        // desired reconfigurable area?
+        if (frames.find(frame_address) == frames.end()) {
+            continue;
+        }
 
 		auto& frame_data = frames[frame_address];
 		frame_data.resize(101);
@@ -117,16 +136,12 @@ int main(int argc, char* argv[]) {
         std::vector<uint32_t> frame_data_ints;
         frame_data_ints.resize(101);
         
-        std::transform(frame_data_strings.begin(),
-               frame_data_strings.end(), frame_data_ints.begin(),
-               [](const std::string& val) -> uint32_t {
-                   return std::stoul(val, nullptr, 16);
-               });
-
-		std::transform(frame_data_ints.begin(),
-		               frame_data_ints.end(), frame_data.begin(),
-                       frame_data.begin(),
-		               std::bit_or<uint32_t>());
+        // Replace the data in the ROI with the bits from the .frm file
+		std::transform(frame_data_strings.begin(),
+		               frame_data_strings.end(), frame_data.begin(),
+		               [](const std::string& val) -> uint32_t {
+			               return std::stoul(val, nullptr, 16);
+                        });
 
 		uint32_t ecc = 0;
 		for (size_t ii = 0; ii < frame_data.size(); ++ii) {
@@ -140,8 +155,101 @@ int main(int argc, char* argv[]) {
 
 	std::vector<std::unique_ptr<xc7series::ConfigurationPacket>>
 	    out_packets;
+        
+    // Generate a type 2 packet to write the CFG_CLB frames
+    std::vector<uint32_t> cfg_clb_packet_data;
+	for (auto& frame : cfg_clb_frames) {
+		std::copy(frame.second.begin(), frame.second.end(),
+		          std::back_inserter(cfg_clb_packet_data));
 
-	// Generate a single type 2 packet that writes everything at once.
+		auto next_address = part->GetNextFrameAddress(frame.first);
+		if (next_address &&
+		    (next_address->block_type() != frame.first.block_type() ||
+		     next_address->is_bottom_half_rows() !=
+		         frame.first.is_bottom_half_rows() ||
+		     next_address->row() != frame.first.row())) {
+			cfg_clb_packet_data.insert(cfg_clb_packet_data.end(), 202, 0);
+		}
+	}
+	cfg_clb_packet_data.insert(cfg_clb_packet_data.end(), 202, 0);
+    
+    // Initialization sequence
+    
+    // 20 00 00 00
+	out_packets.emplace_back(new xc7series::NopPacket());
+    
+    // 0x30008001 Packet Type 1: Write CMD
+    // 0x00000007 Reset CRC
+	out_packets.emplace_back(
+	    new xc7series::ConfigurationPacketWithPayload<1>(
+	        xc7series::ConfigurationPacket::Opcode::Write,
+	        xc7series::ConfigurationRegister::CMD,
+	        {static_cast<uint32_t>(xc7series::Command::RCRC)}));
+            
+    // 20 00 00 00
+	out_packets.emplace_back(new xc7series::NopPacket());
+    
+    // 20 00 00 00
+	out_packets.emplace_back(new xc7series::NopPacket());
+    
+    // 30 01 80 01 Packet Type 1: Write IDCODE register, WORD_COUNT=1
+    // 32 bit IDCODE
+	out_packets.emplace_back(
+	    new xc7series::ConfigurationPacketWithPayload<1>(
+	        xc7series::ConfigurationPacket::Opcode::Write,
+	        xc7series::ConfigurationRegister::IDCODE, {part->idcode()}));
+
+    // 30 00 80 01
+    // 00 00 00 01 CMD[4:0]=00001 (binary) = WCFG (Write configuration data)
+	out_packets.emplace_back(
+	    new xc7series::ConfigurationPacketWithPayload<1>(
+	        xc7series::ConfigurationPacket::Opcode::Write,
+	        xc7series::ConfigurationRegister::CMD,
+	        {static_cast<uint32_t>(xc7series::Command::WCFG)}));
+
+    // 20 00 00 00
+	out_packets.emplace_back(new xc7series::NopPacket());
+    
+    // 30 00 20 01 Set FAR 
+    // FAR = 01 00 00 00
+    // TODO: Does this CFG_CLB addr ever change for different devices? Probably not...
+	out_packets.emplace_back(
+	    new xc7series::ConfigurationPacketWithPayload<1>(
+	        xc7series::ConfigurationPacket::Opcode::Write,
+	        xc7series::ConfigurationRegister::FAR, {0x1000000}));
+            
+    // 20 00 00 00
+	out_packets.emplace_back(new xc7series::NopPacket());
+    
+	// Frame data write
+    // 30 00 40 00 Packet Type 1: Write FDRI register, WORD_COUNT=0
+	out_packets.emplace_back(new xc7series::ConfigurationPacket(
+	    1, xc7series::ConfigurationPacket::Opcode::Write,
+	    xc7series::ConfigurationRegister::FDRI, {}));
+        
+    // Packet Type 2: Write FDRI register, WORD_COUNT=packet_data    
+	out_packets.emplace_back(new xc7series::ConfigurationPacket(
+	    2, xc7series::ConfigurationPacket::Opcode::Write,
+	    xc7series::ConfigurationRegister::FDRI, cfg_clb_packet_data));        
+        
+    // Finalization sequence
+    
+    // 0x30008001 Packet Type 1: Write CMD
+    // 0x00000007 Reset CRC
+	out_packets.emplace_back(
+	    new xc7series::ConfigurationPacketWithPayload<1>(
+	        xc7series::ConfigurationPacket::Opcode::Write,
+	        xc7series::ConfigurationRegister::CMD,
+	        {static_cast<uint32_t>(xc7series::Command::RCRC)}));
+
+    // 0x30008001 Packet Type 1: Write CMD
+    // 0x0000000B Shutdown command?
+ 	out_packets.emplace_back(
+	    new xc7series::ConfigurationPacketWithPayload<1>(
+	        xc7series::ConfigurationPacket::Opcode::Write,
+	        xc7series::ConfigurationRegister::CMD, {0xB}));       
+    
+	// Generate a single type 2 packet that writes everything else at once.
 	std::vector<uint32_t> packet_data;
 	for (auto& frame : frames) {
 		std::copy(frame.second.begin(), frame.second.end(),
@@ -157,166 +265,166 @@ int main(int argc, char* argv[]) {
 		}
 	}
 	packet_data.insert(packet_data.end(), 202, 0);
-
+    
+    
 	// Initialization sequence
+    
+    // 20 00 00 00
 	out_packets.emplace_back(new xc7series::NopPacket());
+    
+    
+    // 0x30008001 Packet Type 1: Write CMD
+    // 0x00000007 Reset CRC
 	out_packets.emplace_back(
 	    new xc7series::ConfigurationPacketWithPayload<1>(
 	        xc7series::ConfigurationPacket::Opcode::Write,
-	        xc7series::ConfigurationRegister::TIMER, {0x0}));
-	out_packets.emplace_back(
-	    new xc7series::ConfigurationPacketWithPayload<1>(
-	        xc7series::ConfigurationPacket::Opcode::Write,
-	        xc7series::ConfigurationRegister::WBSTAR, {0x0}));
+	        xc7series::ConfigurationRegister::CMD,
+	        {static_cast<uint32_t>(xc7series::Command::RCRC)}));
+            
+    // 20 00 00 00
+	out_packets.emplace_back(new xc7series::NopPacket());
+    
+    // 20 00 00 00
+	out_packets.emplace_back(new xc7series::NopPacket());
+    
+    // 20 00 00 00
+	out_packets.emplace_back(new xc7series::NopPacket());
+    
+    // 20 00 00 00
+	out_packets.emplace_back(new xc7series::NopPacket());
+    
+    // 0x30008001 Packet Type 1: Write CMD
+    // 00000000
 	out_packets.emplace_back(
 	    new xc7series::ConfigurationPacketWithPayload<1>(
 	        xc7series::ConfigurationPacket::Opcode::Write,
 	        xc7series::ConfigurationRegister::CMD,
 	        {static_cast<uint32_t>(xc7series::Command::NOP)}));
-	out_packets.emplace_back(new xc7series::NopPacket());
+    
+    // 0x3000C001 Write MASK
+    // Mask bits = 00 00 01 00
 	out_packets.emplace_back(
 	    new xc7series::ConfigurationPacketWithPayload<1>(
 	        xc7series::ConfigurationPacket::Opcode::Write,
-	        xc7series::ConfigurationRegister::CMD,
-	        {static_cast<uint32_t>(xc7series::Command::RCRC)}));
-	out_packets.emplace_back(new xc7series::NopPacket());
-	out_packets.emplace_back(new xc7series::NopPacket());
+	        xc7series::ConfigurationRegister::MASK, {0x100}));
+            
+            
+    // 30 00 A0 01 Write CTL0
+    // Ctrl0  = 00 00 01 00 masked by set mask
 	out_packets.emplace_back(
 	    new xc7series::ConfigurationPacketWithPayload<1>(
 	        xc7series::ConfigurationPacket::Opcode::Write,
-	        xc7series::ConfigurationRegister::UNKNOWN, {0x0}));
-
-	// Configuration Options 0
-	out_packets.emplace_back(new xc7series::ConfigurationPacketWithPayload<
-	                         1>(
-	    xc7series::ConfigurationPacket::Opcode::Write,
-	    xc7series::ConfigurationRegister::COR0,
-	    {xc7series::ConfigurationOptions0Value()
-	         .SetAddPipelineStageForDoneIn(true)
-	         .SetReleaseDonePinAtStartupCycle(
-	             xc7series::ConfigurationOptions0Value::SignalReleaseCycle::
-	                 Phase4)
-	         .SetStallAtStartupCycleUntilDciMatch(
-	             xc7series::ConfigurationOptions0Value::StallCycle::NoWait)
-	         .SetStallAtStartupCycleUntilMmcmLock(
-	             xc7series::ConfigurationOptions0Value::StallCycle::NoWait)
-	         .SetReleaseGtsSignalAtStartupCycle(
-	             xc7series::ConfigurationOptions0Value::SignalReleaseCycle::
-	                 Phase5)
-	         .SetReleaseGweSignalAtStartupCycle(
-	             xc7series::ConfigurationOptions0Value::SignalReleaseCycle::
-	                 Phase6)}));
-
+	        xc7series::ConfigurationRegister::CTL0, {0x100}));
+            
+    // 0x3000C001 Write MASK
+    // Mask bits = 00 00 04 00
 	out_packets.emplace_back(
 	    new xc7series::ConfigurationPacketWithPayload<1>(
 	        xc7series::ConfigurationPacket::Opcode::Write,
-	        xc7series::ConfigurationRegister::COR1, {0x0}));
+	        xc7series::ConfigurationRegister::MASK, {0x400}));
+                        
+    // 30 00 A0 01 Write CTL0
+    // Ctrl0  = 00 00 04 00 masked by set mask
 	out_packets.emplace_back(
 	    new xc7series::ConfigurationPacketWithPayload<1>(
 	        xc7series::ConfigurationPacket::Opcode::Write,
-	        xc7series::ConfigurationRegister::IDCODE, {part->idcode()}));
-	out_packets.emplace_back(
-	    new xc7series::ConfigurationPacketWithPayload<1>(
-	        xc7series::ConfigurationPacket::Opcode::Write,
-	        xc7series::ConfigurationRegister::CMD,
-	        {static_cast<uint32_t>(xc7series::Command::SWITCH)}));
-	out_packets.emplace_back(new xc7series::NopPacket());
-	out_packets.emplace_back(
-	    new xc7series::ConfigurationPacketWithPayload<1>(
-	        xc7series::ConfigurationPacket::Opcode::Write,
-	        xc7series::ConfigurationRegister::MASK, {0x401}));
-	out_packets.emplace_back(
-	    new xc7series::ConfigurationPacketWithPayload<1>(
-	        xc7series::ConfigurationPacket::Opcode::Write,
-	        xc7series::ConfigurationRegister::CTL0, {0x501}));
-	out_packets.emplace_back(
-	    new xc7series::ConfigurationPacketWithPayload<1>(
-	        xc7series::ConfigurationPacket::Opcode::Write,
-	        xc7series::ConfigurationRegister::MASK, {0x0}));
-	out_packets.emplace_back(
-	    new xc7series::ConfigurationPacketWithPayload<1>(
-	        xc7series::ConfigurationPacket::Opcode::Write,
-	        xc7series::ConfigurationRegister::CTL1, {0x0}));
-	out_packets.emplace_back(new xc7series::NopPacket());
-	out_packets.emplace_back(new xc7series::NopPacket());
-	out_packets.emplace_back(new xc7series::NopPacket());
-	out_packets.emplace_back(new xc7series::NopPacket());
-	out_packets.emplace_back(new xc7series::NopPacket());
-	out_packets.emplace_back(new xc7series::NopPacket());
-	out_packets.emplace_back(new xc7series::NopPacket());
-	out_packets.emplace_back(new xc7series::NopPacket());
-	out_packets.emplace_back(
-	    new xc7series::ConfigurationPacketWithPayload<1>(
-	        xc7series::ConfigurationPacket::Opcode::Write,
-	        xc7series::ConfigurationRegister::FAR, {0x0}));
+	        xc7series::ConfigurationRegister::CTL0, {0x400}));            
+            
+    // 30 00 80 01
+    // 00 00 00 01 CMD[4:0]=00001 (binary) = WCFG (Write configuration data)
 	out_packets.emplace_back(
 	    new xc7series::ConfigurationPacketWithPayload<1>(
 	        xc7series::ConfigurationPacket::Opcode::Write,
 	        xc7series::ConfigurationRegister::CMD,
 	        {static_cast<uint32_t>(xc7series::Command::WCFG)}));
+            
+    // 20 00 00 00
 	out_packets.emplace_back(new xc7series::NopPacket());
-
+    
+    // 30 00 20 01 Set FAR 
+    // 00 00 00 00 FAR = roi_start_frame_address
+    // I'm assuming we want to set the FAR to the same address the base bitstream uses
+	out_packets.emplace_back(
+	    new xc7series::ConfigurationPacketWithPayload<1>(
+	        xc7series::ConfigurationPacket::Opcode::Write,
+	        xc7series::ConfigurationRegister::FAR, {roi_start_frame_address}));
+    
+    // 20 00 00 00
+	out_packets.emplace_back(new xc7series::NopPacket());
+    
 	// Frame data write
+    // 30 00 40 00 Packet Type 1: Write FDRI register, WORD_COUNT=0
 	out_packets.emplace_back(new xc7series::ConfigurationPacket(
 	    1, xc7series::ConfigurationPacket::Opcode::Write,
 	    xc7series::ConfigurationRegister::FDRI, {}));
+        
+    // Packet Type 2: Write FDRI register, WORD_COUNT=packet_data    
 	out_packets.emplace_back(new xc7series::ConfigurationPacket(
 	    2, xc7series::ConfigurationPacket::Opcode::Write,
 	    xc7series::ConfigurationRegister::FDRI, packet_data));
 
 	// Finalization sequence
+    
+    // 30 00 80 01 Packet Type 1: Write CMD register, WORD_COUNT=1
+    // 00 00 00 0A CMD[4:0]=01010 (binary) = GRESTORE (Pulse GRESTORE signal)
+    out_packets.emplace_back(
+    new xc7series::ConfigurationPacketWithPayload<1>(
+        xc7series::ConfigurationPacket::Opcode::Write,
+        xc7series::ConfigurationRegister::CMD,
+        {static_cast<uint32_t>(xc7series::Command::GRESTORE)}));
+
+    // 20 00 00 00
+	out_packets.emplace_back(new xc7series::NopPacket());
+
+    // 30 00 C0 01 Packet Type 1: Write MASK register, WORD_COUNT=1
+    // 00 00 01 00 Bit mask for write to CTL0/CTL1 register. MASK[31:0]=00000100 (hex)
+	out_packets.emplace_back(
+	    new xc7series::ConfigurationPacketWithPayload<1>(
+	        xc7series::ConfigurationPacket::Opcode::Write,
+	        xc7series::ConfigurationRegister::MASK, {0x100}));
+    
+    // 30 00 A0 01 Write CTL0
+    // Ctrl0  = 00 00 00 00 masked by set mask
+	out_packets.emplace_back(
+	    new xc7series::ConfigurationPacketWithPayload<1>(
+	        xc7series::ConfigurationPacket::Opcode::Write,
+	        xc7series::ConfigurationRegister::CTL0, {0x0}));
+    
+    // 30 00 80 01 Packet Type 1: Write CMD register, WORD_COUNT=1
+    // 00 00 00 05 CMD[4:0]=00101 (binary) = START (Begin STARTUP sequence)
+	out_packets.emplace_back(
+	    new xc7series::ConfigurationPacketWithPayload<1>(
+	        xc7series::ConfigurationPacket::Opcode::Write,
+	        xc7series::ConfigurationRegister::CMD, {0x5}));   
+
+    // 20 00 00 00
+	out_packets.emplace_back(new xc7series::NopPacket());
+   
+    // 30 00 20 01 Packet Type 1: Write FAR register, WORD_COUNT=1
+    // 03BE0000 FAR (Frame address) = 03BE0000 (hex)
+	out_packets.emplace_back(
+	    new xc7series::ConfigurationPacketWithPayload<1>(
+	        xc7series::ConfigurationPacket::Opcode::Write,
+	        xc7series::ConfigurationRegister::FAR, {0x3BE0000}));
+
+    // 30 00 80 01 Packet Type 1: Write CMD register, WORD_COUNT=1
+    // 00 00 00 07 CMD[4:0]=00111 (binary) = RCRC (Reset CRC register)
 	out_packets.emplace_back(
 	    new xc7series::ConfigurationPacketWithPayload<1>(
 	        xc7series::ConfigurationPacket::Opcode::Write,
 	        xc7series::ConfigurationRegister::CMD,
 	        {static_cast<uint32_t>(xc7series::Command::RCRC)}));
-	out_packets.emplace_back(new xc7series::NopPacket());
-	out_packets.emplace_back(new xc7series::NopPacket());
-	out_packets.emplace_back(
-	    new xc7series::ConfigurationPacketWithPayload<1>(
-	        xc7series::ConfigurationPacket::Opcode::Write,
-	        xc7series::ConfigurationRegister::CMD,
-	        {static_cast<uint32_t>(xc7series::Command::GRESTORE)}));
-	out_packets.emplace_back(new xc7series::NopPacket());
-	out_packets.emplace_back(
-	    new xc7series::ConfigurationPacketWithPayload<1>(
-	        xc7series::ConfigurationPacket::Opcode::Write,
-	        xc7series::ConfigurationRegister::CMD,
-	        {static_cast<uint32_t>(xc7series::Command::LFRM)}));
-	for (int ii = 0; ii < 100; ++ii) {
-		out_packets.emplace_back(new xc7series::NopPacket());
-	}
-	out_packets.emplace_back(
-	    new xc7series::ConfigurationPacketWithPayload<1>(
-	        xc7series::ConfigurationPacket::Opcode::Write,
-	        xc7series::ConfigurationRegister::CMD,
-	        {static_cast<uint32_t>(xc7series::Command::START)}));
-	out_packets.emplace_back(new xc7series::NopPacket());
-	out_packets.emplace_back(
-	    new xc7series::ConfigurationPacketWithPayload<1>(
-	        xc7series::ConfigurationPacket::Opcode::Write,
-	        xc7series::ConfigurationRegister::FAR, {0x3be0000}));
-	out_packets.emplace_back(
-	    new xc7series::ConfigurationPacketWithPayload<1>(
-	        xc7series::ConfigurationPacket::Opcode::Write,
-	        xc7series::ConfigurationRegister::MASK, {0x501}));
-	out_packets.emplace_back(
-	    new xc7series::ConfigurationPacketWithPayload<1>(
-	        xc7series::ConfigurationPacket::Opcode::Write,
-	        xc7series::ConfigurationRegister::CTL0, {0x501}));
-	out_packets.emplace_back(
-	    new xc7series::ConfigurationPacketWithPayload<1>(
-	        xc7series::ConfigurationPacket::Opcode::Write,
-	        xc7series::ConfigurationRegister::CMD,
-	        {static_cast<uint32_t>(xc7series::Command::RCRC)}));
-	out_packets.emplace_back(new xc7series::NopPacket());
-	out_packets.emplace_back(new xc7series::NopPacket());
+   
+
+    // 30 00 80 01 Packet Type 1: Write CMD register, WORD_COUNT=1
+    // 00 00 00 0D CMD[4:0]=01101 (binary) = DESYNCH (Reset DALIGN)
 	out_packets.emplace_back(
 	    new xc7series::ConfigurationPacketWithPayload<1>(
 	        xc7series::ConfigurationPacket::Opcode::Write,
 	        xc7series::ConfigurationRegister::CMD,
 	        {static_cast<uint32_t>(xc7series::Command::DESYNC)}));
-	for (int ii = 0; ii < 400; ++ii) {
+   
+	for (int ii = 0; ii < 16; ++ii) {
 		out_packets.emplace_back(new xc7series::NopPacket());
 	}
 
@@ -334,7 +442,7 @@ int main(int argc, char* argv[]) {
 	std::vector<uint8_t> bit_header{0x0,  0x9,  0x0f, 0xf0, 0x0f,
 	                                0xf0, 0x0f, 0xf0, 0x0f, 0xf0,
 	                                0x00, 0x00, 0x01, 'a'};
-	auto build_source = absl::StrCat(FLAGS_frm_file, ";Generator=xc7patch");
+	auto build_source = absl::StrCat(FLAGS_frm_file, ";Generator=partial_bitgen");
 	bit_header.push_back(
 	    static_cast<uint8_t>((build_source.size() + 1) >> 8));
 	bit_header.push_back(static_cast<uint8_t>(build_source.size() + 1));
@@ -401,4 +509,3 @@ int main(int argc, char* argv[]) {
 
 	return 0;
 }
-

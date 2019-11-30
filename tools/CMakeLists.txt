@@ -25,3 +25,11 @@ target_link_libraries(xc7patch
 	gflags
 	libprjxray
 )
+
+add_executable(xc7PartialPatch xc7PartialPatch.cc)
+target_link_libraries(xc7PartialPatch
+	absl::strings
+	absl::time
+	gflags
+	libprjxray
+)
