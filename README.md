@@ -1,3 +1,13 @@
+# Notice
+This fork of Project X-Ray is meant for use with [Maverick](https://github.com/byuccl/maverick).
+At the time this fork was made, Project X-Ray did not support Zynq devices, such as the xc7z020clg400-1 SoC on the PYNQ-Z1 board.
+This fork contains modified fuzzers that add support for generating a database for a region of the xc7z020clg400-1 device.
+Additionally, this fork contains xc7PartialPatch - a program similar to xc7Patch for patching partial bitstreams with FRM files.
+
+Since this fork and these changes were made, many changes and improvements have been made to Project X-Ray.
+It now supports Zynq devices and the format of several files, including the FASM format and the tile grid format, have changed.
+As such, the modified files and xc7PartialPatch will not work with the current versions of Project X-Ray without additional effort.
+
 # Project X-Ray
 
 Documenting the Xilinx 7-series bit-stream format.
